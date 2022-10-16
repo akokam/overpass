@@ -1,5 +1,5 @@
 import httpx
-from pydantic import BaseModel, HttpUrl, ValidationError
+from pydantic import BaseSettings, ValidationError
 
 from overpass.models import Response
 
@@ -28,29 +28,31 @@ class ParsingError(RequestError):
     """Raised when an overpass response was not parsable"""
 
 
-class Config(BaseModel):
+class Config(BaseSettings):
     """Configuration for overpass
 
     All environment variables shall be prefixed with `OVERPASS_`, e.g.:
       - OVERPASS_BASE_URL=localhost:"""
 
     class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
         env_prefix = "OVERPASS_"
 
-    base_url: HttpUrl = "https://lz4.overpass-api.de"
-    port: int = 80
+    base_url: str = "https://lz4.overpass-api.de"
+    port: int = 8083
     timeout: int = 60
 
 
 class Client:
-    def __init__(self, cfg: Config = None):
+    def __init__(self, config: Config = None):
         """Self-initializing if no specific config is provided
 
         TODO: Add details that it connects to 'standard instance'
         """
 
-        client_cfg = cfg or Config()
-        self._overpass = httpx.Client(base_url=client_cfg.base_url)
+        cfg = config or Config()
+        self._overpass = httpx.Client(base_url=f"{cfg.base_url}:{cfg.port}")
 
     def query(self, query: str) -> Response:
         """Query the OpenStreetMap database with Overpass QL"""
@@ -66,7 +68,7 @@ class Client:
         """
 
         try:
-            response = self._overpass.post(url="/api/interpreter", data=payload)
+            response = self._overpass.post(url="/api/interpreter", content=payload)
         except (TimeoutError, ConnectionError) as e:
             # TODO: Check if httpx.RequestError works too
             raise LocalConnectionError(e)
@@ -74,9 +76,8 @@ class Client:
         try:
             response.raise_for_status()
         except httpx.HTTPError as e:
-            # TODO: Raise specific error
             # TODO: Differentiate between client and server error
-            raise Exception(e)
+            raise RequestError(e)
 
         try:
             return Response(**response.json())
